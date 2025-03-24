@@ -29,7 +29,7 @@ const bot = new TelegramBot(token, { polling: false });
 
 
 // CORS middleware
-app.use(cors());
+app.use(cors({ origin: "*" })); // Allow all origins
 
 // Middleware to handle JSON requests
 app.use(express.json());
