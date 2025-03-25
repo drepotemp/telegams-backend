@@ -58,6 +58,7 @@ export const fetchMedia = async (req: Request, res: Response, bot: any, token: s
         if (isSticker) {
             try {
                 stickerSet = await bot.getStickerSet(username);
+                // console.log(stickerSet)
                 chat = {
                     type: 'sticker',
                     title: stickerSet.title,
@@ -220,8 +221,9 @@ export const fetchMedia = async (req: Request, res: Response, bot: any, token: s
                 name: stickerSet.name,
                 title: stickerSet.title,
                 stickers: stickerSet.stickers.map((sticker: any) => ({
-                    emoji: sticker.emoji,
-                    fileId: sticker.file_id
+                    
+                    fileId: sticker.file_id,
+                    isAnimated:sticker.is_animated
                 }))
             } : null
         };

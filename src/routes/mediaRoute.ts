@@ -248,4 +248,64 @@ mediaRouter.get("/approved", async (req: Request, res: Response) => {
     }
 });
 
+mediaRouter.get("/:id", async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params
+
+        if (!id) {
+            return res.status(400).json({ success: false, error: "Media id is required." })
+        }
+
+        // Fetch media based on the id
+        const mediaItem = await MediaModel.findById(id);
+
+        if (!mediaItem) {
+            return res.status(404).json({ success: false, error: "Media not found." })
+        }
+
+
+        res.status(200).json({ success: true, data: mediaItem });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+mediaRouter.post("/you-may-like/:mediaType", async (req: Request, res: Response) => {
+    try {
+        const { mediaType } = req.params
+        const { exclude } = req.body
+
+        if (!mediaType) {
+            return res.status(400).json({ success: false, error: "Media type is required." })
+        }
+
+        if (!exclude) {
+            return res.status(400).json({ success: false, error: "Please provide the media id of the current page." })
+        }
+
+        const excludedItemExists = await MediaModel.findById(exclude)
+        if (!excludedItemExists) {
+            return res.status(400).json({ success: false, error: "Excluded item does not exist." })
+        }
+
+        // Fetch media based on mediaType while excluding a specific ID
+        const mediaItems = await MediaModel.find({
+            mediaType,
+            _id: { $ne: exclude }, // Exclude the given ID
+        }).limit(8);
+
+        if (!mediaItems) {
+            return res.status(404).json({ success: false, error: "No media." })
+        }
+
+
+        res.status(200).json({ success: true, data: mediaItems });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
 export default mediaRouter
