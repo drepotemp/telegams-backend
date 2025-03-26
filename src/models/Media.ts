@@ -16,6 +16,7 @@ export interface IMedia extends Document {
   status: "Pending" | "Approved" | "Rejected";
   mediaType: "Bot" | "Group" | "Channel" | "Sticker";
   stickerImages:[string]
+  animatedSticker:Boolean
 }
 
 const MediaSchema: Schema = new Schema(
@@ -34,7 +35,8 @@ const MediaSchema: Schema = new Schema(
     nsfw: { type: Boolean, default: false },
     status: { type: String, enum: ["Pending", "Approved", "Rejected"], default: "Pending" },
     mediaType: { type: String, enum: ["bot", "group", "channel", "sticker"], },
-    stickerImages:{type:[String]}
+    stickerImages:{type:[String]},
+    animatedSticker:{type:Boolean}
   },
   { timestamps: true } // Adds createdAt and updatedAt fields
 );

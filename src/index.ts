@@ -27,6 +27,7 @@ if (!token) {
 
 // Create a bot instance
 const bot = new TelegramBot(token, { polling: false });
+(global as any).bot = bot
 
 
 // CORS middleware

@@ -1,4 +1,5 @@
 const cloudinary = require("cloudinary").v2;
+import axios from "axios";
 import "dotenv/config"
 
 // 🔹 Configure Cloudinary (Replace with your credentials)
@@ -13,7 +14,7 @@ cloudinary.config({
  * @param {string} base64String - The Base64 image string.
  * @returns {Promise<string>} - The image URL.
  */
-export const getSecureImage = async (base64String:string)=>{
+export const getSecureImage = async (base64String: string) => {
     try {
         if (!base64String) throw new Error("No image provided");
 
@@ -28,3 +29,29 @@ export const getSecureImage = async (base64String:string)=>{
         throw new Error("Image upload failed");
     }
 }
+
+
+export const getSecureTgsLink = async (tgsUrl: string) => {
+    try {
+        // 1. Download TGS file as a BINARY BUFFER (not JSON)
+        const response = await axios.get(tgsUrl, { responseType: 'arraybuffer' });
+        const tgsBuffer = Buffer.from(response.data);
+
+        // 2. Upload to Cloudinary as RAW binary data
+        const result = await cloudinary.uploader.upload(
+            `data:application/json;base64,${tgsBuffer.toString('base64')}`,
+            {
+                folder: "telegam_images",
+                resource_type: 'raw',
+                // Let Cloudinary generate a clean public_id
+                overwrite: false,
+            }
+        );
+
+        // 3. Return the permanent link
+        return result.secure_url;
+    } catch (error) {
+        console.error("Failed to upload TGS:", error);
+        throw error;
+    }
+};

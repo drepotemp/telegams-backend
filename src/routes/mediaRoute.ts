@@ -3,7 +3,7 @@ import MediaModel from "../models/Media";
 const mediaRouter = express.Router()
 const cloudinary = require("cloudinary").v2;
 import "dotenv/config"
-import { getSecureImage } from "../helpers/getSecureImage";
+import { getSecureImage, getSecureTgsLink } from "../helpers/getSecureImage";
 
 // 🔹 Configure Cloudinary (Replace with your credentials)
 cloudinary.config({
@@ -12,55 +12,79 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+// Telegram Bot Token - Get this from BotFather
+const token = process.env.TELEGRAM_BOT_TOKEN;
 
 mediaRouter.post("/new", async (req: Request, res: Response) => {
     try {
-        // const requiredFields = [
-        //     "name",
-        //     "subscribers",
-        //     "author",
-        //     "category",
-        //     "language",
-        //     "longDescription",
-        //     "shortDescription",
-        //     "mediaType",
-        // ];
+        let mediaData: any = {};
+        let mediaType = req.body.type;
 
-        // // Check for missing fields
-        // const missingFields = requiredFields.filter((field) => !req.body[field]);
-        // if (missingFields.length > 0) {
-        //     return res.status(400).json({
-        //         error: `Missing required fields: ${missingFields.join(", ")}`,
-        //     });
-        // }
+        mediaType = (mediaType == "group" || mediaType == "supergroup") ? "group" : mediaType?.toLowerCase();
+        let imageUrl = req.body.imageUrl;
 
-        let mediaType = req.body.type
-
-        mediaType = (mediaType == "group" || mediaType == "supergroup") ? "group" : mediaType?.toLowerCase()
-        let imageUrl = req.body.imageUrl
+        // Upload image to cloudinary 
         if (imageUrl) {
-            imageUrl = await getSecureImage(imageUrl)
+            if (imageUrl.endsWith("tgs")) {
+                mediaData.animatedSticker = true;
+                imageUrl = await getSecureTgsLink(imageUrl);
+                console.log(imageUrl)
+            } else {
+                mediaData.animatedSticker = false;
+                imageUrl = await getSecureImage(imageUrl);
+            }
         }
 
         // Manually set the date
-        const mediaData = {
-            ...req.body,
+        mediaData = {
+            ...mediaData,
             imageUrl,
-            date: new Date().toISOString(), // Store as ISO string
+            date: new Date().toISOString(),
             mediaType,
             author: "test@user.mail"
         };
+
+        console.log(mediaData.imageUrl)
+
+        if (req.body.stickerSet) {
+            let stickers = req.body.stickerSet.stickers;
+            if (stickers && stickers.length > 0) {
+                // Process all stickers in parallel
+                const stickerProcessingPromises = stickers.map(async (sticker: { fileId: string }) => {
+                    try {
+                        const file = await (global as any).bot.getFile(sticker.fileId);
+                        const stickerUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+
+                        return stickerUrl.endsWith("tgs")
+                            ? await getSecureTgsLink(stickerUrl)
+                            : await getSecureImage(stickerUrl);
+                    } catch (error) {
+                        console.error(`Failed to process sticker ${sticker.fileId}:`, error);
+                        return null; // or handle error as needed
+                    }
+                });
+
+                // Wait for all stickers to process
+                const resolvedLinks = await Promise.all(stickerProcessingPromises);
+
+                // Filter out any failed uploads (null values)
+                mediaData.stickerImages = resolvedLinks.filter(link => link !== null);
+            }
+        }
+
+        mediaData = { ...req.body, ...mediaData, }; //This order is important, ...req.body before ...mediaData to prevent overriding
 
         // Create new document
         const newMedia = new MediaModel(mediaData);
         await newMedia.save();
 
-        res.status(201).json({ success: true, message: "Media created successfully", });
+        res.status(201).json({ success: true, message: "Media created successfully" });
     } catch (error) {
+        console.error("Error in media creation:", error);
         res.status(500).json({ error: "Internal Server Error" });
-        console.log(error);
     }
 });
+
 
 mediaRouter.put("/:id", async (req: Request, res: Response) => {
     try {
@@ -101,26 +125,42 @@ mediaRouter.delete("/:id", async (req: Request, res: Response) => {
             return res.status(404).json({ error: "Media not found" });
         }
 
-        // 🔥 Extract Cloudinary public ID from image URL
-        const imageUrl = media?.imageUrl;
+        // Prepare all deletion promises
+        const deletionPromises:any = [];
 
-        if (imageUrl) {
-            const publicId = imageUrl.split('/').pop()?.split('.')[0]; // Extract public ID
+        // Main image deletion
+        if (media.imageUrl) {
+            const publicId = media.imageUrl.split('/').pop()?.split('.')[0];
             if (publicId) {
-                try {
-                    await cloudinary.uploader.destroy("telegam_images/" + publicId);
-                } catch (error) {
-                    console.log("Error deleting img:\n", error)
-                }
-
+                deletionPromises.push(
+                    cloudinary.uploader.destroy("telegam_images/" + publicId)
+                        .catch((error:any) => console.log("Error deleting main image:", error))
+                );
             }
         }
 
+        // Sticker images deletion
+        if (media.stickerImages?.length > 0) {
+            media.stickerImages.forEach(sticker => {
+                const publicId = sticker.split('/').pop()?.split('.')[0];
+                if (publicId) {
+                    deletionPromises.push(
+                        cloudinary.uploader.destroy(
+                            "telegam_images/" + publicId,
+                            media.animatedSticker ? { resource_type: 'raw' } : undefined
+                        ).catch((error:any) => console.log("Error deleting sticker:", error))
+                    );
+                }
+            });
+        }
 
-        // ❌ Delete media from MongoDB
+        // Execute all deletions in parallel
+        await Promise.all(deletionPromises);
+
+        // Delete from MongoDB
         await MediaModel.findByIdAndDelete(id);
 
-        res.status(200).json({ message: "Media and image deleted successfully" });
+        res.status(200).json({ message: "Media and images deleted successfully" });
     } catch (error) {
         res.status(500).json({ error: "Internal server error", details: error });
     }
@@ -141,19 +181,42 @@ mediaRouter.post("/delete-many", async (req: Request, res: Response) => {
             return res.status(404).json({ error: "No media found for the given IDs" });
         }
 
-        // 🔥 Extract Cloudinary public IDs from URLs
-        const publicIds = mediaItems
-            .map((media) => {
-                const imageUrl = media?.imageUrl;
-                if (!imageUrl) return null; // Handle cases where imageUrl is undefined or null
-                return imageUrl.split('/').pop()?.split('.')[0]; // Extract public ID
-            })
-            .filter((id): id is string => id !== null); // Remove null values and ensure correct type
+        // Prepare all deletion promises
+        const deletionPromises:any = [];
 
-        // 🚀 Delete images from Cloudinary
-        await cloudinary.api.delete_resources("telegam_images/" + publicIds);
+        // Process all media items
+        mediaItems.forEach(media => {
+            // Main image deletion
+            if (media.imageUrl) {
+                const publicId = media.imageUrl.split('/').pop()?.split('.')[0];
+                if (publicId) {
+                    deletionPromises.push(
+                        cloudinary.uploader.destroy("telegam_images/" + publicId)
+                            .catch((error:any)  => console.log("Error deleting main image:", error))
+                    );
+                }
+            }
 
-        // ❌ Delete media records from MongoDB
+            // Sticker images deletion
+            if (media.stickerImages?.length > 0) {
+                media.stickerImages.forEach(sticker => {
+                    const publicId = sticker.split('/').pop()?.split('.')[0];
+                    if (publicId) {
+                        deletionPromises.push(
+                            cloudinary.uploader.destroy(
+                                "telegam_images/" + publicId,
+                                media.animatedSticker ? { resource_type: 'raw' } : undefined
+                            ).catch((error:any)  => console.log("Error deleting sticker:", error))
+                        );
+                    }
+                });
+            }
+        });
+
+        // Execute all deletions in parallel
+        await Promise.all(deletionPromises);
+
+        // Delete from MongoDB
         await MediaModel.deleteMany({ _id: { $in: ids } });
 
         res.status(200).json({ message: `${mediaItems.length} media items and images deleted successfully` });

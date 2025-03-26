@@ -1,8 +1,7 @@
-import axios from "axios";
+
 import "dotenv/config"
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 import { Request, Response } from "express";
-import { getSecureImage } from "../helpers/getSecureImage";
+
 
 export const fetchMedia = async (req: Request, res: Response, bot: any, token: string) => {
     try {
@@ -221,9 +220,7 @@ export const fetchMedia = async (req: Request, res: Response, bot: any, token: s
                 name: stickerSet.name,
                 title: stickerSet.title,
                 stickers: stickerSet.stickers.map((sticker: any) => ({
-                    
                     fileId: sticker.file_id,
-                    isAnimated:sticker.is_animated
                 }))
             } : null
         };
